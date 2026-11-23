@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Essayage d’ongles – module 1</title>
+<style>
+  :root {
+    --fond: #231a22;
+    --panneau: #2f242e;
+    --texte: #f4ece9;
+    --discret: #b9a9ae;
+    --accent: #e58aa0;
+    --bord: #4a3a47;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--fond); color: var(--texte);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 12px; display: grid; gap: 12px; }
+  .scene { position: relative; background: #000; border-radius: 14px; overflow: hidden; aspect-ratio: 4 / 3; }
+  canvas { width: 100%; height: 100%; display: block; object-fit: contain; }
+  #etat { position: absolute; left: 12px; right: 12px; bottom: 12px; padding: 8px 12px; border-radius: 10px;
+    background: rgba(35,26,34,.82); font-size: 14px; line-height: 1.4; }
+  #etat[hidden] { display: none; }
+  .panneau { background: var(--panneau); border: 1px solid var(--bord); border-radius: 14px; padding: 14px; display: grid; gap: 14px; }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+  .teintes { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .teinte { width: 38px; height: 38px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+  .teinte[aria-pressed="true"] { border-color: var(--texte); outline: 2px solid var(--accent); outline-offset: 2px; }
+  .teinte:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  input[type=color] { width: 44px; height: 38px; padding: 0; border: 1px solid var(--bord); border-radius: 8px; background: none; }
+  .reglages { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  label { display: grid; gap: 4px; font-size: 14px; color: var(--discret); }
+  label span b { color: var(--texte); font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  select, button { font: inherit; color: var(--texte); background: var(--fond); border: 1px solid var(--bord);
+    border-radius: 10px; padding: 9px 12px; cursor: pointer; }
+  button.principal { background: var(--accent); color: #2b1620; border-color: var(--accent); font-weight: 600; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  .astuce { font-size: 13px; color: var(--discret); margin: 0; }
+  @media (prefers-reduced-motion: no-preference) { button { transition: background .15s; } }
+</style>
+</head>
+<body>
+<main>
+  <section class="scene">
+    <canvas id="toile"></canvas>
+    <div id="etat">Chargement du modèle de détection…</div>
+  </section>
+
+  <section class="panneau">
+    <h1>Essayage d’ongles – module 1</h1>
+
+    <div>
+      <h2>Teinte</h2>
+      <div class="teintes" id="teintes"></div>
+    </div>
+
+    <div class="reglages">
+      <label>Style
+        <select id="style">
+          <option value="uni">Couleur unie</option>
+          <option value="french">French (pointe blanche)</option>
+        </select>
+      </label>
+      <label>Finition
+        <select id="finition">
+          <option value="brillant">Brillante</option>
+          <option value="mat">Mate</option>
+        </select>
+      </label>
+      <label><span>Position le long du doigt : <b id="vPos"></b></span>
+        <input type="range" id="pos" min="0.40" max="0.95" step="0.01" value="0.70"></label>
+      <label><span>Longueur de l’ongle : <b id="vLong"></b></span>
+        <input type="range" id="long" min="0.40" max="1.10" step="0.01" value="0.72"></label>
+      <label><span>Largeur de l’ongle : <b id="vLarg"></b></span>
+        <input type="range" id="larg" min="0.40" max="1.20" step="0.01" value="0.78"></label>
+      <label><span>Opacité : <b id="vOpa"></b></span>
+        <input type="range" id="opa" min="0.30" max="1" step="0.01" value="0.92"></label>
+    </div>
+
+    <div class="actions">
+      <button id="btnCamera">Changer de caméra</button>
+      <button id="btnPhoto" class="principal">Prendre une photo</button>
+    </div>
+
+    <p class="astuce">Pour de meilleurs résultats : montre le dos de la main, doigts légèrement écartés, avec une bonne lumière face à toi. Les réglages de position, longueur et largeur servent à caler l’ongle ; note les valeurs qui te semblent les plus justes.</p>
+  </section>
+</main>
+
+<script type="module">
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const WASM  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const MODELE = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+
+// Teintes proposées (nom, couleur)
+const TEINTES = [
+  ["Rouge cerise", "#c1121f"], ["Rose poudré", "#e8a0b4"], ["Nude", "#d9a58f"],
+  ["Bordeaux", "#6d1a36"], ["Bleu nuit", "#1b2a49"], ["Vert sauge", "#8fa88f"], ["Noir", "#1a1a1a"]
+];
+
+// Pour chaque doigt : [articulation avant la pointe, pointe]
+const DOIGTS = [[3, 4], [7, 8], [11, 12], [15, 16], [19, 20]];
+
+const toile = document.getElementById("toile");
+const ctx = toile.getContext("2d");
+const etat = document.getElementById("etat");
+const video = document.createElement("video");
+video.playsInline = true; video.muted = true;
+
+const etatApp = {
+  couleur: TEINTES[0][1], style: "uni", finition: "brillant",
+  pos: 0.70, long: 0.72, larg: 0.78, opa: 0.92,
+  facing: "user"
+};
+
+/* ---------- Interface ---------- */
+const zoneTeintes = document.getElementById("teintes");
+TEINTES.forEach(([nom, hex], i) => {
+  const b = document.createElement("button");
+  b.className = "teinte"; b.style.background = hex; b.title = nom; b.setAttribute("aria-label", nom);
+  b.setAttribute("aria-pressed", i === 0 ? "true" : "false");
+  b.onclick = () => choisir(hex, b);
+  zoneTeintes.appendChild(b);
+});
+const libre = document.createElement("input");
+libre.type = "color"; libre.value = etatApp.couleur; libre.title = "Teinte personnalisée";
+libre.setAttribute("aria-label", "Teinte personnalisée");
+libre.oninput = () => choisir(libre.value, null);
+zoneTeintes.appendChild(libre);
+
+function choisir(hex, bouton) {
+  etatApp.couleur = hex;
+  zoneTeintes.querySelectorAll(".teinte").forEach(b => b.setAttribute("aria-pressed", "false"));
+  if (bouton) bouton.setAttribute("aria-pressed", "true");
+}
+
+function lier(id, cle, affichage) {
+  const el = document.getElementById(id), val = document.getElementById(affichage);
+  const maj = () => { etatApp[cle] = parseFloat(el.value); val.textContent = Math.round(etatApp[cle] * 100) + " %"; };
+  el.oninput = maj; maj();
+}
+lier("pos", "pos", "vPos"); lier("long", "long", "vLong"); lier("larg", "larg", "vLarg"); lier("opa", "opa", "vOpa");
+document.getElementById("style").onchange = e => etatApp.style = e.target.value;
+document.getElementById("finition").onchange = e => etatApp.finition = e.target.value;
+
+/* ---------- Caméra ---------- */
+let flux = null;
+async function demarrerCamera() {
+  if (flux) flux.getTracks().forEach(t => t.stop());
+  try {
+    flux = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: etatApp.facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+    });
+  } catch (e) {
+    message("Impossible d’accéder à la caméra. Autorise-la dans le navigateur, et ouvre la page via http://localhost (pas en double-clic sur le fichier).");
+    throw e;
+  }
+  video.srcObject = flux;
+  await video.play();
+  toile.width = video.videoWidth; toile.height = video.videoHeight;
+  toile.parentElement.style.aspectRatio = `${video.videoWidth} / ${video.videoHeight}`;
+}
+document.getElementById("btnCamera").onclick = async () => {
+  etatApp.facing = etatApp.facing === "user" ? "environment" : "user";
+  await demarrerCamera();
+};
+function message(t) { etat.textContent = t; etat.hidden = !t; }
+
+/* ---------- Détection ---------- */
+let detecteur;
+async function creerDetecteur() {
+  const vision = await FilesetResolver.forVisionTasks(WASM);
+  const options = (delegate) => ({
+    baseOptions: { modelAssetPath: MODELE, delegate },
+    runningMode: "VIDEO", numHands: 2,
+    minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5
+  });
+  try { return await HandLandmarker.createFromOptions(vision, options("GPU")); }
+  catch { return await HandLandmarker.createFromOptions(vision, options("CPU")); }
+}
+
+/* ---------- Lissage des points (réduit le tremblement) ---------- */
+const lisse = [];  // lisse[main][indice] = {x, y}
+const ALPHA = 0.55;
+function lisser(m, i, p, w, h) {
+  const cible = { x: p.x * w, y: p.y * h };
+  lisse[m] = lisse[m] || [];
+  const a = lisse[m][i];
+  lisse[m][i] = a ? { x: a.x + (cible.x - a.x) * ALPHA, y: a.y + (cible.y - a.y) * ALPHA } : cible;
+  return lisse[m][i];
+}
+
+/* ---------- Rendu d’un ongle ---------- */
+function dessinerOngle(dip, tip, pouce) {
+  const dx = tip.x - dip.x, dy = tip.y - dip.y;
+  const d = Math.hypot(dx, dy);
+  if (d < 6) return;
+  const L = d * etatApp.long;
+  const W = d * etatApp.larg * (pouce ? 1.15 : 1);
+  const cx = dip.x + dx * etatApp.pos, cy = dip.y + dy * etatApp.pos;
+  const angle = Math.atan2(dy, dx);
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);           // axe x local = direction du doigt vers la pointe
+  ctx.globalAlpha = etatApp.opa;
+
+  // Forme de l'ongle : rectangle aux coins arrondis, plus rond côté pointe
+  const rayon = Math.min(W * 0.48, L * 0.5);
+  ctx.beginPath();
+  ctx.roundRect(-L / 2, -W / 2, L, W, [W * 0.22, rayon, rayon, W * 0.22]);
+  ctx.clip();
+
+  if (etatApp.style === "french") {
+    ctx.fillStyle = "#e9c7b8";
+    ctx.fillRect(-L / 2, -W / 2, L, W);
+    ctx.fillStyle = "#fbf6f1";
+    ctx.beginPath();
+    ctx.ellipse(L / 2 + L * 0.12, 0, L * 0.34, W * 0.75, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = etatApp.couleur;
+    ctx.fillRect(-L / 2, -W / 2, L, W);
+  }
+
+  if (etatApp.finition === "brillant") {
+    const g = ctx.createLinearGradient(0, -W / 2, 0, W / 2);
+    g.addColorStop(0.00, "rgba(255,255,255,0.00)");
+    g.addColorStop(0.18, "rgba(255,255,255,0.38)");
+    g.addColorStop(0.34, "rgba(255,255,255,0.00)");
+    g.addColorStop(1.00, "rgba(0,0,0,0.12)");
+    ctx.fillStyle = g;
+    ctx.fillRect(-L / 2, -W / 2, L, W);
+  }
+  ctx.restore();
+
+  // Fin contour pour ancrer l'ongle sur le doigt
+  ctx.save();
+  ctx.translate(cx, cy); ctx.rotate(angle);
+  ctx.globalAlpha = 0.35; ctx.lineWidth = Math.max(1, W * 0.03); ctx.strokeStyle = "rgba(0,0,0,0.5)";
+  ctx.beginPath();
+  ctx.roundRect(-L / 2, -W / 2, L, W, [W * 0.22, rayon, rayon, W * 0.22]);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/* ---------- Boucle principale ---------- */
+let dernierTemps = -1, derniereMesure = performance.now(), images = 0;
+function boucle() {
+  if (video.readyState >= 2 && detecteur) {
+    const w = toile.width, h = toile.height;
+
+    // Image miroir (comme un selfie) si caméra avant
+    ctx.save();
+    if (etatApp.facing === "user") { ctx.translate(w, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(video, 0, 0, w, h);
+
+    if (video.currentTime !== dernierTemps) {
+      dernierTemps = video.currentTime;
+      boucle.res = detecteur.detectForVideo(video, performance.now());
+    }
+    const mains = (boucle.res && boucle.res.landmarks) || [];
+    lisse.length = mains.length;
+    mains.forEach((pts, m) => {
+      DOIGTS.forEach(([a, b], k) => {
+        const dip = lisser(m, a, pts[a], w, h), tip = lisser(m, b, pts[b], w, h);
+        dessinerOngle(dip, tip, k === 0);
+      });
+    });
+    ctx.restore();
+
+    message(mains.length ? "" : "Montre le dos de ta main à la caméra.");
+
+    // Mesure de fluidité (affichée dans le titre de l'onglet)
+    images++;
+    const now = performance.now();
+    if (now - derniereMesure > 1000) {
+      document.title = `Essayage d’ongles – ${images} i/s`;
+      images = 0; derniereMesure = now;
+    }
+  }
+  requestAnimationFrame(boucle);
+}
+
+/* ---------- Photo ---------- */
+document.getElementById("btnPhoto").onclick = () => {
+  toile.toBlob(blob => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "essayage-ongles.png";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }, "image/png");
+};
+
+/* ---------- Démarrage ---------- */
+(async () => {
+  try {
+    detecteur = await creerDetecteur();
+    message("Démarrage de la caméra…");
+    await demarrerCamera();
+    message("Montre le dos de ta main à la caméra.");
+    boucle();
+  } catch (e) {
+    console.error(e);
+    if (!etat.textContent.startsWith("Impossible")) message("Erreur au chargement : " + e.message);
+  }
+})();
+</script>
+</body>
+</html>
